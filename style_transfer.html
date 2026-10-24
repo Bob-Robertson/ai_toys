@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Neural Style Transfer</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.7.4/dist/tf.min.js"></script>
+<style>
+:root{--bg:#f6f5f1;--card:#fff;--tx:#1d1d1b;--mut:#6b6b66;--ac:#c2410c;--bd:#e2e0d8;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#161614;--card:#222220;--tx:#f0efe9;--mut:#a3a29a;--ac:#fb923c;--bd:#37362f;color-scheme:dark}}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:960px;margin:0 auto;padding:20px 16px 40px}
+h1{font:700 26px/1.2 Georgia,serif;margin:0 0 4px}
+.s{color:var(--mut);margin:0 0 18px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:0 0 8px}
+canvas{width:100%;height:auto;max-height:420px;object-fit:contain;border-radius:8px;background:#8883;display:block}
+input[type=file]{margin-top:8px;font-size:13px;max-width:100%}
+.ctl{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:14px 0}
+label{display:block;font-size:13px;color:var(--mut)}
+label b{color:var(--tx)}
+input[type=range],select{width:100%;accent-color:var(--ac)}
+select{padding:6px;border-radius:6px;background:var(--card);color:var(--tx);border:1px solid var(--bd)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+button{font:600 14px inherit;font-family:inherit;padding:10px 18px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--tx);cursor:pointer}
+button.p{background:var(--ac);border-color:var(--ac);color:#fff}
+button:disabled{opacity:.5;cursor:default}
+#st{color:var(--mut);font-size:13px}
+</style>
+</head>
+<body>
+<main>
+<h1>Neural Style Transfer</h1>
+<p class="s">Pretrained arbitrary style transfer (Magenta) running in your browser with TensorFlow.js. Nothing is uploaded anywhere.</p>
+
+<div class="grid">
+ <div class="card"><h2>Content</h2><canvas id="c1"></canvas><input type="file" id="f1" accept="image/*"></div>
+ <div class="card"><h2>Style</h2><canvas id="c2"></canvas><input type="file" id="f2" accept="image/*"></div>
+ <div class="card"><h2>Result</h2><canvas id="co" width="64" height="64"></canvas></div>
+</div>
+
+<div class="ctl">
+ <label>Style strength: <b id="vs">100</b>%<input id="ws" type="range" min="0" max="100" value="100"></label>
+ <label>Output size (longest side)
+  <select id="rs"><option>384</option><option selected>512</option><option>768</option><option>1024</option></select></label>
+ <label>Style detail
+  <select id="sz"><option value="128">Coarse (128)</option><option value="256" selected>Normal (256)</option><option value="384">Fine (384)</option></select></label>
+ <label style="display:flex;gap:8px;align-items:center;color:var(--tx)"><input type="checkbox" id="kc"> Keep original colors</label>
+</div>
+<div class="row">
+ <button class="p" id="go" disabled>Stylize</button>
+ <button id="dl">Download</button>
+ <span id="st">Loading models…</span>
+</div>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+const c1=$('c1'),c2=$('c2'),co=$('co');
+const BASES=[
+  'https://cdn.jsdelivr.net/gh/reiinakano/arbitrary-image-stylization-tfjs@gh-pages/',
+  'https://reiinakano.github.io/arbitrary-image-stylization-tfjs/',
+  'https://raw.githubusercontent.com/reiinakano/arbitrary-image-stylization-tfjs/gh-pages/'
+];
+let styleNet,transNet;
+
+async function loadModel(dir){
+  for(const b of BASES){
+    try{return await tf.loadGraphModel(b+dir+'/model.json')}
+    catch(e){console.warn('Model source failed',b,e)}
+  }
+  throw new Error('Could not load '+dir+' from any source');
+}
+(async()=>{
+  try{
+    [styleNet,transNet]=await Promise.all([loadModel('saved_model_style_js'),loadModel('saved_model_transformer_separable_js')]);
+    $('go').disabled=false;$('st').textContent='Ready';
+  }catch(e){$('st').textContent='Model load failed: '+e.message}
+})();
+
+/* procedural samples */
+function rng(s){return()=>(s=(s*1664525+1013904223)>>>0)/4294967296}
+function sampleContent(x){
+  let g=x.createLinearGradient(0,0,0,256);g.addColorStop(0,'#5aa0e0');g.addColorStop(.65,'#f5d5a0');
+  x.fillStyle=g;x.fillRect(0,0,256,256);
+  x.fillStyle='#fff3b0';x.beginPath();x.arc(190,70,28,0,7);x.fill();
+  x.fillStyle='#4f8a4a';x.beginPath();x.ellipse(70,230,170,80,0,0,7);x.fill();
+  x.fillStyle='#386b3a';x.beginPath();x.ellipse(230,245,150,70,0,0,7);x.fill();
+  x.fillStyle='#b5543a';x.fillRect(90,140,80,60);
+  x.fillStyle='#5a2a20';x.beginPath();x.moveTo(80,142);x.lineTo(130,100);x.lineTo(180,142);x.fill();
+  x.fillStyle='#3b2a1e';x.fillRect(120,165,20,35);
+  x.fillStyle='#bfe3ff';x.fillRect(98,152,16,16);x.fillRect(148,152,16,16);
+}
+function sampleStyle(x){
+  x.fillStyle='#12214a';x.fillRect(0,0,256,256);
+  const r=rng(42),pal=['#f2c94c','#2f6bd6','#8fd3f4','#1b2a6b','#fff3b0','#4aa3a0'];
+  for(let i=0;i<1100;i++){
+    let px=r()*256,py=r()*256;x.strokeStyle=pal[(r()*pal.length)|0];x.lineWidth=2+r()*4;x.lineCap='round';
+    x.beginPath();x.moveTo(px,py);
+    for(let k=0;k<6;k++){const a=Math.sin(px*.03)*2+Math.cos(py*.03)*2;px+=Math.cos(a)*5;py+=Math.sin(a)*5;x.lineTo(px,py)}
+    x.stroke();
+  }
+}
+[[c1,sampleContent],[c2,sampleStyle]].forEach(([c,f])=>{c.width=c.height=512;const x=c.getContext('2d');x.scale(2,2);f(x)});
+
+function load(file,cv){
+  const img=new Image();
+  img.onload=()=>{
+    const k=Math.min(1,2048/Math.max(img.width,img.height));
+    cv.width=Math.round(img.width*k);cv.height=Math.round(img.height*k);
+    cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);URL.revokeObjectURL(img.src);
+  };
+  img.src=URL.createObjectURL(file);
+}
+$('f1').onchange=e=>e.target.files[0]&&load(e.target.files[0],c1);
+$('f2').onchange=e=>e.target.files[0]&&load(e.target.files[0],c2);
+$('ws').oninput=()=>$('vs').textContent=$('ws').value;
+$('dl').onclick=()=>{const a=document.createElement('a');a.href=co.toDataURL('image/png');a.download='stylized.png';a.click()};
+
+const W=tf.tensor1d([.299,.587,.114]);
+const L=x=>x.mul(W).sum(3,true);
+
+$('go').onclick=async()=>{
+  const btn=$('go');btn.disabled=true;$('st').textContent='Stylizing…';
+  await tf.nextFrame();await tf.nextFrame();
+  try{
+    const N=+$('rs').value,ratio=+$('ws').value/100,S=+$('sz').value,keep=$('kc').checked;
+    const k=N/Math.max(c1.width,c1.height);
+    const w=Math.max(8,Math.round(c1.width*k/8)*8),h=Math.max(8,Math.round(c1.height*k/8)*8);
+    const out=tf.tidy(()=>{
+      const c=tf.image.resizeBilinear(tf.browser.fromPixels(c1).toFloat().div(tf.scalar(255)),[h,w]).expandDims(0);
+      const s=tf.image.resizeBilinear(tf.browser.fromPixels(c2).toFloat().div(tf.scalar(255)),[S,S]).expandDims(0);
+      let b=styleNet.predict(s);
+      if(ratio<1){
+        const ib=styleNet.predict(tf.image.resizeBilinear(c,[S,S]));
+        b=b.mul(tf.scalar(ratio)).add(ib.mul(tf.scalar(1-ratio)));
+      }
+      let r=transNet.predict([c,b]).clipByValue(0,1);
+      if(keep)r=c.add(L(r).sub(L(c))).clipByValue(0,1);
+      return r.squeeze(0);
+    });
+    await tf.browser.toPixels(out,co);out.dispose();
+    $('st').textContent='Done ('+w+'×'+h+')';
+  }catch(e){console.error(e);$('st').textContent='Error: '+e.message+' (try a smaller output size)'}
+  btn.disabled=false;
+};
+</script>
+</body>
+</html>
